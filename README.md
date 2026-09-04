@@ -115,3 +115,7 @@ The suite covers the cryptographic primitives against known reference vectors, f
 ## Academic context
 
 This project was developed as the semester project for **CSE447: Cryptography and Cryptanalysis**, Summer 2026.
+
+## License
+
+All rights reserved. See [LICENSE](LICENSE).
