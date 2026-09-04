@@ -1,14 +1,9 @@
 """
 Django settings for the Grimoire backend.
 
-Deliberately does NOT install django.contrib.admin, django.contrib.auth, or
-django.contrib.sessions: this project rolls its own User model, its own
-from-scratch password hashing (PBKDF2, crypto_core/pbkdf2.py) and its own
-HMAC-signed session tokens (accounts/sessions.py) rather than Django's
-built-ins, since the assignment requires everything crypto-related to be
-hand-implemented. There is no /admin/. Super Admin functionality is just
-regular RBAC-gated API endpoints/pages like everything else, not a separate
-privileged interface bolted on by the framework.
+Does not install django.contrib.admin, django.contrib.auth, or
+django.contrib.sessions; those are replaced by custom implementations
+in accounts/ and vault/.
 """
 
 import os
@@ -81,11 +76,7 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 ).split(",")
 CORS_ALLOW_CREDENTIALS = True
 
-# The master keypair's private half never lives in the DB. It's generated once
-# (scripts/generate_master_key.py) and its private key stored only here, as an
-# env var, loaded into memory at process start. Every User/Project RSA and ECC
-# private key is RSA-OAEP-chunk-encrypted to MASTER_PUBLIC_KEY_N/E before being
-# written to the DB, and decrypted with MASTER_PRIVATE_KEY_D only in memory.
+# Master keypair for wrapping private key material; see grimoire/master_key.py.
 MASTER_PUBLIC_KEY_N = int(os.environ["MASTER_PUBLIC_KEY_N"]) if os.environ.get("MASTER_PUBLIC_KEY_N") else None
 MASTER_PUBLIC_KEY_E = int(os.environ.get("MASTER_PUBLIC_KEY_E", "65537"))
 MASTER_PRIVATE_KEY_D = int(os.environ["MASTER_PRIVATE_KEY_D"]) if os.environ.get("MASTER_PRIVATE_KEY_D") else None
@@ -96,10 +87,7 @@ SESSION_SIGNING_KEY = os.environ.get("SESSION_SIGNING_KEY", "dev-only-session-hm
 # HMAC key for CredentialRecord/Project tamper-detection tags (the MAC requirement).
 RECORD_HMAC_KEY = os.environ.get("RECORD_HMAC_KEY", "dev-only-record-hmac-key-override-in-.env").encode()
 
-# HMAC key for deterministic "blind index" lookups (e.g. find a user by username
-# at login time without decrypting every row). OAEP encryption is randomized,
-# so username_enc can't be queried directly; a keyed HMAC of the normalized
-# value gives an indexable, non-reversible lookup column instead.
+# HMAC key for deterministic blind-index lookups on encrypted fields.
 LOOKUP_INDEX_KEY = os.environ.get("LOOKUP_INDEX_KEY", "dev-only-lookup-index-key-override-in-.env").encode()
 
 REST_FRAMEWORK = {
