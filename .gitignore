@@ -7,6 +7,8 @@ backend/*/__pycache__/
 backend/*/migrations/__pycache__/
 **/__pycache__/
 *.pyc
+#local only
+backend/vault/management/
 
 # Frontend (Next.js)
 frontend/node_modules/
