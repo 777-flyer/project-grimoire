@@ -36,6 +36,8 @@ export function NavBar({ role, username }: { role?: Role; username?: string }) {
     try {
       await api.post("/api/auth/logout");
       toast("You've been logged out.", "info");
+    } catch {
+      // session was already invalid/expired server-side; redirect regardless
     } finally {
       router.push("/login");
     }
