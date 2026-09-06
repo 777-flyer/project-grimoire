@@ -617,3 +617,187 @@ def task_summary(user) -> dict:
         "passwords_overdue_rotation": passwords_overdue_rotation,
     }
 
+
+def _cached_project_name(project: Project, cache: dict) -> str:
+    if project.pk not in cache:
+        try:
+            cache[project.pk] = decrypt_project_name(project)
+        except (hmac_utils.IntegrityError, rsa.OAEPError):
+            cache[project.pk] = "<integrity check failed>"
+    return cache[project.pk]
+
+
+def _safe_record_fields(record: CredentialRecord):
+    try:
+        return decrypt_record(record)
+    except (hmac_utils.IntegrityError, rsa.OAEPError):
+        return None
+
+
+def list_pending_approvals(user) -> list:
+    managed = managed_projects(user)
+    names: dict = {}
+    items = []
+    for record in CredentialRecord.objects.filter(
+        project__in=managed, approval_status=ApprovalStatus.PENDING
+    ).select_related("project").order_by("-created_at"):
+        fields = _safe_record_fields(record)
+        items.append({
+            "kind": "record",
+            "project_id": record.project_id,
+            "project_name": _cached_project_name(record.project, names),
+            "record_id": record.pk,
+            "provider_name": fields["provider_name"] if fields else None,
+            "platform_type": record.platform_type,
+            "detail": "New credential awaiting approval",
+            "created_at": record.created_at,
+        })
+    for cr in ChangeRequest.objects.filter(
+        record__project__in=managed, status=ApprovalStatus.PENDING
+    ).select_related("record", "record__project").order_by("-created_at"):
+        fields = _safe_record_fields(cr.record)
+        items.append({
+            "kind": "change_request",
+            "project_id": cr.record.project_id,
+            "project_name": _cached_project_name(cr.record.project, names),
+            "record_id": cr.record_id,
+            "change_request_id": cr.pk,
+            "provider_name": fields["provider_name"] if fields else None,
+            "platform_type": cr.record.platform_type,
+            "detail": "Change request awaiting approval",
+            "created_at": cr.created_at,
+        })
+    items.sort(key=lambda i: i["created_at"], reverse=True)
+    return items
+
+
+def list_open_issues(user) -> list:
+    names: dict = {}
+    items = []
+    for record in CredentialRecord.objects.filter(project__in=accessible_projects(user)).select_related("project"):
+        fields = _safe_record_fields(record)
+        if not fields:
+            continue
+        for note in fields.get("notes", []):
+            if note["kind"] == "issue" and note["status"] == "open":
+                items.append({
+                    "kind": "issue",
+                    "project_id": record.project_id,
+                    "project_name": _cached_project_name(record.project, names),
+                    "record_id": record.pk,
+                    "note_id": note["id"],
+                    "provider_name": fields["provider_name"],
+                    "platform_type": record.platform_type,
+                    "detail": note["text"],
+                    "created_at": note["at"],
+                })
+    items.sort(key=lambda i: i["created_at"], reverse=True)
+    return items
+
+
+def list_my_pending_submissions(user) -> list:
+    names: dict = {}
+    items = []
+    for record in CredentialRecord.objects.filter(
+        created_by=user, approval_status=ApprovalStatus.PENDING
+    ).select_related("project").order_by("-created_at"):
+        fields = _safe_record_fields(record)
+        items.append({
+            "kind": "record",
+            "project_id": record.project_id,
+            "project_name": _cached_project_name(record.project, names),
+            "record_id": record.pk,
+            "provider_name": fields["provider_name"] if fields else None,
+            "platform_type": record.platform_type,
+            "detail": "Awaiting Project Manager approval",
+            "created_at": record.created_at,
+        })
+    for cr in ChangeRequest.objects.filter(
+        submitted_by=user, status=ApprovalStatus.PENDING
+    ).select_related("record", "record__project").order_by("-created_at"):
+        fields = _safe_record_fields(cr.record)
+        items.append({
+            "kind": "change_request",
+            "project_id": cr.record.project_id,
+            "project_name": _cached_project_name(cr.record.project, names),
+            "record_id": cr.record_id,
+            "change_request_id": cr.pk,
+            "provider_name": fields["provider_name"] if fields else None,
+            "platform_type": cr.record.platform_type,
+            "detail": "Change request awaiting approval",
+            "created_at": cr.created_at,
+        })
+    items.sort(key=lambda i: i["created_at"], reverse=True)
+    return items
+
+
+def list_expiring_soon(user) -> list:
+    names: dict = {}
+    items = []
+    records = CredentialRecord.objects.filter(
+        project__in=accessible_projects(user),
+        approval_status=ApprovalStatus.APPROVED,
+        expires_on__isnull=False,
+        expires_on__lte=timezone.now().date() + timedelta(days=30),
+    ).select_related("project").order_by("expires_on")
+    for record in records:
+        fields = _safe_record_fields(record)
+        items.append({
+            "kind": "expiring",
+            "project_id": record.project_id,
+            "project_name": _cached_project_name(record.project, names),
+            "record_id": record.pk,
+            "provider_name": fields["provider_name"] if fields else None,
+            "platform_type": record.platform_type,
+            "detail": f"Expires on {record.expires_on.isoformat()}",
+            "expires_on": record.expires_on,
+        })
+    return items
+
+
+def list_overdue_passwords(user) -> list:
+    names: dict = {}
+    items = []
+    rotation_cutoff = timezone.now() - timedelta(days=90)
+    records = CredentialRecord.objects.filter(
+        project__in=accessible_projects(user),
+        approval_status=ApprovalStatus.APPROVED,
+    ).filter(
+        Q(password_last_rotated__isnull=True) | Q(password_last_rotated__lt=rotation_cutoff)
+    ).select_related("project").order_by("password_last_rotated")
+    for record in records:
+        fields = _safe_record_fields(record)
+        if record.password_last_rotated is None:
+            detail, days = "Password has never been rotated", None
+        else:
+            days = (timezone.now() - record.password_last_rotated).days
+            detail = f"{days} days since last rotation"
+        items.append({
+            "kind": "overdue_password",
+            "project_id": record.project_id,
+            "project_name": _cached_project_name(record.project, names),
+            "record_id": record.pk,
+            "provider_name": fields["provider_name"] if fields else None,
+            "platform_type": record.platform_type,
+            "detail": detail,
+            "days_since_rotation": days,
+        })
+    return items
+
+
+_TASK_DETAIL_FUNCS = {
+    "pending_approvals": list_pending_approvals,
+    "open_issues": list_open_issues,
+    "my_pending_submissions": list_my_pending_submissions,
+    "expiring_soon": list_expiring_soon,
+    "passwords_overdue_rotation": list_overdue_passwords,
+}
+
+
+def task_detail(user, category: str) -> list:
+    """The item list backing one task_summary() tile, for the dashboard's click-to-expand view."""
+    func = _TASK_DETAIL_FUNCS.get(category)
+    if func is None:
+        raise ValueError(f"unknown category: {category}")
+    return func(user)
+

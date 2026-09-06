@@ -420,3 +420,17 @@ class TaskSummaryView(APIView):
 
     def get(self, request):
         return Response(services.task_summary(request.user))
+
+
+class TaskDetailView(APIView):
+    """The item list behind one task-summary tile, fetched when it's expanded."""
+
+    authentication_classes = [SessionTokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, category):
+        try:
+            items = services.task_detail(request.user, category)
+        except ValueError:
+            return Response({"error": "unknown category"}, status=404)
+        return Response(items)

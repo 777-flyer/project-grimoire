@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
     path("project-managers", views.ProjectManagersView.as_view()),
     path("tasks-summary", views.TaskSummaryView.as_view()),
+    path("tasks-summary/<str:category>", views.TaskDetailView.as_view()),
     path("projects", views.ProjectListCreateView.as_view()),
     path("projects/<int:project_id>", views.ProjectDetailView.as_view()),
     path("projects/<int:project_id>/feed", views.FeedView.as_view()),

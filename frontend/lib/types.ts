@@ -140,3 +140,20 @@ export interface TaskSummary {
   expiring_soon: number;
   passwords_overdue_rotation: number;
 }
+
+export type TaskDetailKind = "record" | "change_request" | "issue" | "expiring" | "overdue_password";
+
+export interface TaskDetailItem {
+  kind: TaskDetailKind;
+  project_id: number;
+  project_name: string;
+  record_id: number;
+  change_request_id?: number;
+  note_id?: string;
+  provider_name: string | null;
+  platform_type: PlatformType;
+  detail: string;
+  created_at?: string;
+  expires_on?: string;
+  days_since_rotation?: number | null;
+}
